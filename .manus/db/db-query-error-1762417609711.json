@@ -1,0 +1,18 @@
+{
+  "query": "INSERT INTO dataSources (name, description, connectionString, schema, createdBy) VALUES (\n  'Sales Database',\n  'Production sales data warehouse',\n  'mysql://localhost/sales_db',\n  '{\n    \"tables\": [\"orders\", \"products\", \"customers\"],\n    \"fields\": [\n      {\"name\": \"revenue\", \"type\": \"DECIMAL\"},\n      {\"name\": \"product_category\", \"type\": \"VARCHAR\"},\n      {\"name\": \"date\", \"type\": \"DATE\"},\n      {\"name\": \"customer_status\", \"type\": \"VARCHAR\"},\n      {\"name\": \"order_id\", \"type\": \"INT\"},\n      {\"name\": \"customer_id\", \"type\": \"INT\"}\n    ]\n  }',\n  1\n);",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway02.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 34hgUcZdjimuLAQ.root --database KEAPFK5jrFCsN3N8wabx4W --execute INSERT INTO dataSources (name, description, connectionString, schema, createdBy) VALUES (\n  'Sales Database',\n  'Production sales data warehouse',\n  'mysql://localhost/sales_db',\n  '{\n    \"tables\": [\"orders\", \"products\", \"customers\"],\n    \"fields\": [\n      {\"name\": \"revenue\", \"type\": \"DECIMAL\"},\n      {\"name\": \"product_category\", \"type\": \"VARCHAR\"},\n      {\"name\": \"date\", \"type\": \"DATE\"},\n      {\"name\": \"customer_status\", \"type\": \"VARCHAR\"},\n      {\"name\": \"order_id\", \"type\": \"INT\"},\n      {\"name\": \"customer_id\", \"type\": \"INT\"}\n    ]\n  }',\n  1\n);",
+  "returncode": 1,
+  "logs": [
+    "ERROR 1064 (42000) at line 1: You have an error in your SQL syntax; check the manual that corresponds to your TiDB version for the right syntax to use line 1 column 68 near \"schema, createdBy) VALUES (",
+    "  'Sales Database',",
+    "  'Production sales data warehouse',",
+    "  'mysql://localhost/sales_db',",
+    "  '{",
+    "    \"tables\": [\"orders\", \"products\", \"customers\"],",
+    "    \"fields\": [",
+    "      {\"name\": \"revenue\", \"type\": \"DECIMAL\"},",
+    "      {\"name\": \"product_category\", \"type\": \"VARCHAR\"},",
+    "      {\"name\": \"date\", \"type\": \"DATE\"},",
+    "      {\"name\": \"customer_status\", \"ty"
+  ]
+}

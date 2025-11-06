@@ -1,0 +1,20 @@
+{
+  "version": "7",
+  "dialect": "mysql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1762417390487,
+      "tag": "0000_slim_warpath",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1762417414225,
+      "tag": "0001_marvelous_proemial_gods",
+      "breakpoints": true
+    }
+  ]
+}

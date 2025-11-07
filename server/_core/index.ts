@@ -8,6 +8,20 @@ import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 
+function summarizePayload(payload: unknown) {
+  if (!payload || typeof payload !== "object") {
+    return "<empty>";
+  }
+
+  try {
+    const json = JSON.stringify(payload);
+    if (!json) return "<empty>";
+    return json.length > 1024 ? `${json.slice(0, 1024)}… (truncated)` : json;
+  } catch {
+    return "<unserializable>";
+  }
+}
+
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
     const server = net.createServer();
@@ -33,6 +47,26 @@ async function startServer() {
   // Configure body parser with larger size limit for file uploads
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
+  app.use((req, res, next) => {
+    const start = Date.now();
+    const preview = summarizePayload(req.body);
+
+    console.log(
+      `[HTTP] ${req.method} ${req.originalUrl} -> body: ${preview}`
+    );
+
+    res.on("finish", () => {
+      const duration = Date.now() - start;
+      const contentLength = res.get("content-length");
+      console.log(
+        `[HTTP] ${req.method} ${req.originalUrl} <- ${res.statusCode} ${
+          contentLength ? `${contentLength}b` : ""
+        } (${duration}ms)`
+      );
+    });
+
+    next();
+  });
   // OAuth callback under /api/oauth/callback
   registerOAuthRoutes(app);
   // tRPC API

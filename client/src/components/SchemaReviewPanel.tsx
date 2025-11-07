@@ -185,13 +185,50 @@ export function SchemaReviewPanel({
 
           {/* Data Preview Tab */}
           <TabsContent value="preview" className="space-y-4">
-            <div className="rounded-lg border border-slate-200 p-8 text-center">
-              <Eye className="h-12 w-12 text-slate-400 mx-auto mb-4" />
-              <h3 className="text-lg font-semibold text-slate-900 mb-2">Data Preview</h3>
-              <p className="text-sm text-slate-600">
-                Data preview will show sample results once the report is executed
-              </p>
-            </div>
+            {(() => {
+              const preview = schemaReview.dataPreview;
+              if (preview && preview.rows.length > 0) {
+                const columns = Object.keys(preview.rows[0]);
+                return (
+                  <div className="rounded-lg border border-slate-200 overflow-auto">
+                    <table className="w-full text-left text-sm">
+                      <thead className="bg-slate-100">
+                        <tr>
+                          {columns.map(key => (
+                            <th key={key} className="px-4 py-2 font-semibold text-slate-700 border-b border-slate-200">
+                              {key}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {preview.rows.map((row, rowIndex) => (
+                          <tr key={rowIndex} className="border-b border-slate-100">
+                            {columns.map(key => (
+                              <td key={key} className="px-4 py-2 text-slate-600">
+                                {String(row[key] ?? "")}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <div className="px-4 py-2 text-xs text-slate-500">
+                      Showing {preview.rows.length} of {preview.totalRows} rows.
+                    </div>
+                  </div>
+                );
+              }
+              return (
+                <div className="rounded-lg border border-slate-200 p-8 text-center">
+                  <Eye className="h-12 w-12 text-slate-400 mx-auto mb-4" />
+                  <h3 className="text-lg font-semibold text-slate-900 mb-2">Data Preview</h3>
+                  <p className="text-sm text-slate-600">
+                    Data preview will show sample results once the report is executed
+                  </p>
+                </div>
+              );
+            })()}
           </TabsContent>
         </Tabs>
 

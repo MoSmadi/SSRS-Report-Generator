@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { trpc } from "@/lib/trpc";
+import { useState, useEffect, useMemo } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -10,19 +10,29 @@ import { Loader2, Copy, Check } from "lucide-react";
 import { toast } from "sonner";
 import { SchemaReviewPanel } from "@/components/SchemaReviewPanel";
 import { InferenceReviewTable } from "@/components/InferenceReviewTable";
-import type { SchemaReview } from "@shared/schemaTypes";
-
-interface SchemaInsights {
-  coveragePercent: number;
-  matchedFields: Array<{ name: string; column: string; confidence: number }>;
-  missingFields: Array<{ name: string; suggestions: string[] }>;
-}
+import type { AggregationType, DataFormat, SchemaReview, SemanticRole } from "@shared/schemaTypes";
+import {
+  fetchCustomerDatabases,
+  generateSQL as generateSQLApi,
+  inferFromNaturalLanguage,
+  publishReport as publishReportApi,
+  previewReport,
+  type AvailableColumn,
+  type ColumnDef,
+  type ParamDef,
+  type PreviewResponse,
+  type SchemaInsights,
+  type SuggestedMappingEntry,
+} from "@/lib/reportApi";
 
 interface Inference {
   metrics: string[];
   dimensions: string[];
   filters: Array<{ field: string; operator: string; value: string }>;
   schemaInsights?: SchemaInsights;
+  availableColumns: AvailableColumn[];
+  spec?: Record<string, unknown>;
+  suggestedMapping?: SuggestedMappingEntry[];
 }
 
 interface SQLResult {
@@ -30,6 +40,118 @@ interface SQLResult {
   metrics: string[];
   dimensions: string[];
   filters: Array<{ field: string; operator: string; value: string }>;
+  parameters: ParamDef[];
+  columns: ColumnDef[];
+}
+
+/** Accept {databases:[{name}|string]}, or [{name}|string], or string[] → normalize to string[] */
+function normalizeDbList(raw: unknown): string[] {
+  if (!raw) return [];
+  const list = Array.isArray(raw) ? raw : (raw as any)?.databases ?? [];
+  const names = (Array.isArray(list) ? list : [])
+    .map((x: any) => (typeof x === "string" ? x : x?.name))
+    .filter((n: any): n is string => typeof n === "string" && n.trim().length > 0);
+  return Array.from(new Set(names)); // dedupe just in case
+}
+
+function formatQueryError(error: unknown): string {
+  if (!error) return "Unknown error";
+  if (typeof error === "string") return error;
+  if (error instanceof Error) return error.message;
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function coerceStringArray(value: unknown): string[] {
+  if (!value) return [];
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    return [value];
+  }
+  return [];
+}
+
+function buildSchemaReviewModel(
+  columns: ColumnDef[] = [],
+  parameters: ParamDef[] = [],
+  preview?: PreviewResponse | null
+): SchemaReview {
+  const fields = columns.map(column => {
+    const resolvedRole: SemanticRole =
+      column.role === "measure" || column.role === "dimension" || column.role === "time"
+        ? column.role
+        : column.role === "date" || column.type?.toLowerCase().includes("date")
+          ? "time"
+          : column.role === "metric"
+            ? "measure"
+            : "dimension";
+
+    const isMeasure = resolvedRole === "measure";
+    const isTime = resolvedRole === "time";
+    const dataFormat: DataFormat = isMeasure ? "number" : isTime ? "date" : "text";
+    const aggregation: AggregationType = isMeasure ? "SUM" : "NONE";
+
+    return {
+      technicalName: column.name,
+      displayName: column.name,
+      source: column.name,
+      included: true,
+      description: column.description ?? "",
+      semanticRole: resolvedRole,
+      dataType: column.type ?? (isMeasure ? "decimal" : isTime ? "datetime" : "nvarchar"),
+      dataFormat,
+      aggregation,
+      samples: [],
+      nullPercentage: 0,
+      cardinality: undefined,
+      validationBadges: [],
+      isDetected: true,
+      detectionConfidence: undefined,
+    };
+  });
+
+  const mappedParameters = parameters.map(param => ({
+    name: param.name,
+    technicalName: param.name,
+    type: (param.type as any) ?? "string",
+    defaultValue: param.default ?? null,
+    promptText: param.prompt ?? param.name,
+    allowMultiple: false,
+    isRange: false,
+    options: undefined,
+  }));
+
+  const measures = fields.filter(field => field.semanticRole === "measure").map(field => field.technicalName);
+  const firstDimension = fields.find(field => field.semanticRole !== "measure");
+
+  return {
+    fields,
+    parameters: mappedParameters,
+    chartConfig: {
+      type: measures.length > 1 ? "column" : "bar",
+      xAxis: firstDimension?.technicalName ?? null,
+      series: null,
+      values: measures,
+      sortBy: "category",
+      sortDirection: "asc",
+      showDataLabels: false,
+      showLegend: true,
+      title: undefined,
+    },
+    dataPreview: preview
+      ? {
+          rows: preview.rows as any,
+          totalRows: preview.rowCount,
+          page: 1,
+          pageSize: Math.max(preview.rows.length, 1),
+        }
+      : null,
+  };
 }
 
 export default function ReportBuilder() {
@@ -41,7 +163,7 @@ export default function ReportBuilder() {
   // Inference and generation state
   const [inference, setInference] = useState<Inference | null>(null);
   const [sqlResult, setSqlResult] = useState<SQLResult | null>(null);
-  const [fieldMetadata, setFieldMetadata] = useState<any[]>([]);
+  const [fieldMetadata, setFieldMetadata] = useState<AvailableColumn[]>([]);
   const [publishedLink, setPublishedLink] = useState<string | null>(null);
   const [schemaReview, setSchemaReview] = useState<SchemaReview | null>(null);
   const [showSchemaReview, setShowSchemaReview] = useState(false);
@@ -52,25 +174,6 @@ export default function ReportBuilder() {
     inference && inference.schemaInsights && inference.schemaInsights.missingFields.length > 0
   );
 
-  // Debug logging
-  console.log("[ReportBuilder] Render - schemaReview:", schemaReview);
-  console.log("[ReportBuilder] Render - schemaReview?.fields:", schemaReview?.fields);
-  console.log("[ReportBuilder] Render - schemaReview?.parameters:", schemaReview?.parameters);
-  console.log("[ReportBuilder] Render - schemaReview?.chartConfig:", schemaReview?.chartConfig);
-  console.log("[ReportBuilder] Render - showSchemaReview:", showSchemaReview);
-
-  // Also log to help debug
-  if (schemaReview && !schemaReview.fields) {
-    console.error("[ReportBuilder] ERROR: schemaReview exists but fields is undefined!");
-    console.error("[ReportBuilder] schemaReview keys:", Object.keys(schemaReview));
-  }
-  if (schemaReview && !schemaReview.parameters) {
-    console.error("[ReportBuilder] ERROR: schemaReview exists but parameters is undefined!");
-  }
-  if (schemaReview && !schemaReview.chartConfig) {
-    console.error("[ReportBuilder] ERROR: schemaReview exists but chartConfig is undefined!");
-  }
-
   // Loading states
   const [inferenceLoading, setInferenceLoading] = useState(false);
   const [sqlLoading, setSqlLoading] = useState(false);
@@ -78,37 +181,38 @@ export default function ReportBuilder() {
   const [copiedLink, setCopiedLink] = useState(false);
 
   // API calls
-  const customerDatabasesQuery = trpc.report.customerDatabases.useQuery();
-  const inferMutation = trpc.report.inferFromNaturalLanguage.useMutation();
-  const generateSQLMutation = trpc.report.generateSQL.useMutation();
-  const fieldMetadataQuery = trpc.report.getFieldMetadata.useQuery(
-    { databaseName: selectedDatabase ?? "__pending__" },
-    { enabled: !!selectedDatabase }
-  );
-  const getSchemaReviewMutation = trpc.report.getSchemaReview.useQuery(
-    { sql: sqlResult?.sql || "", reportTitle },
-    { enabled: !!sqlResult?.sql } // Auto-trigger when SQL is available
-  );
-  const publishMutation = trpc.report.publishReport.useMutation();
+  const customerDatabasesQuery = useQuery({
+    queryKey: ["customerDatabases"],
+    queryFn: fetchCustomerDatabases,
+  });
 
-  const customerDatabases = customerDatabasesQuery.data || [];
+  const inferMutation = useMutation({ mutationFn: inferFromNaturalLanguage });
+  const generateSQLMutation = useMutation({ mutationFn: generateSQLApi });
+  const publishMutation = useMutation({ mutationFn: publishReportApi });
+  const previewMutation = useMutation({ mutationFn: previewReport });
+
+  // 🔧 Normalize DBs no matter what shape the backend returns
+  const customerDatabases = useMemo(() => {
+    const normalized = normalizeDbList(customerDatabasesQuery.data as any);
+    if (customerDatabasesQuery.isSuccess) {
+      if (normalized.length === 0) {
+        console.warn("[FE] No databases returned. Raw payload:", customerDatabasesQuery.data);
+      } else {
+        console.info("[FE] Databases fetched:", normalized);
+      }
+    }
+    return normalized;
+  }, [customerDatabasesQuery.data, customerDatabasesQuery.isSuccess]);
 
   useEffect(() => {
-    if (selectedDatabase && fieldMetadataQuery.data) {
-      setFieldMetadata(fieldMetadataQuery.data);
-    } else if (!selectedDatabase) {
-      setFieldMetadata([]);
+    if (customerDatabasesQuery.isError) {
+      console.error("[FE] customerDatabasesQuery error:", customerDatabasesQuery.error);
     }
-  }, [selectedDatabase, fieldMetadataQuery.data]);
+  }, [customerDatabasesQuery.isError, customerDatabasesQuery.error]);
 
-  // Handle schema review data
-  useEffect(() => {
-    if (getSchemaReviewMutation.data) {
-      console.log("[useEffect] Schema review data available:", getSchemaReviewMutation.data);
-      setSchemaReview(getSchemaReviewMutation.data);
-      toast.success("Schema review ready!");
-    }
-  }, [getSchemaReviewMutation.data]);
+  const customerDatabasesErrorMessage = customerDatabasesQuery.isError
+    ? formatQueryError(customerDatabasesQuery.error)
+    : null;
 
   // Handle inference
   const handleInference = async () => {
@@ -116,23 +220,50 @@ export default function ReportBuilder() {
       toast.error("Please select a customer database before analyzing");
       return;
     }
-
     if (!naturalLanguageRequest.trim()) {
       toast.error("Please enter a natural language request");
       return;
     }
-
     setInferenceLoading(true);
     try {
-      const result = await inferMutation.mutateAsync({
-        request: naturalLanguageRequest,
-        databaseName: selectedDatabase,
+      const response = await inferMutation.mutateAsync({
+        db: selectedDatabase,
+        title: reportTitle,
+        text: naturalLanguageRequest,
       });
-      setInference(result);
+
+      const spec = (response.spec ?? {}) as Record<string, unknown>;
+      const specMetrics = spec["metrics"] ?? spec["metric"];
+      const specDimensions = spec["dimensions"] ?? spec["dims"];
+      const metrics =
+        response.metrics && response.metrics.length > 0
+          ? response.metrics
+          : coerceStringArray(specMetrics);
+      const dimensions =
+        response.dimensions && response.dimensions.length > 0
+          ? response.dimensions
+          : coerceStringArray(specDimensions);
+      const filters = Array.isArray(response.filters) ? response.filters : [];
+      const availableColumns = response.availableColumns ?? [];
+
+      setInference({
+        metrics,
+        dimensions,
+        filters,
+        schemaInsights: response.schemaInsights,
+        availableColumns,
+        spec: response.spec,
+        suggestedMapping: response.suggestedMapping,
+      });
+      setFieldMetadata(availableColumns);
+      setSqlResult(null);
+      setSchemaReview(null);
+      setShowSchemaReview(false);
+      setPublishedLink(null);
       setEditedFields([]);
       toast.success("Inference completed");
       setShowFieldEditor(false);
-      if (result?.schemaInsights?.missingFields?.length) {
+      if (response?.schemaInsights?.missingFields?.length) {
         toast.warning(
           `Some fields were not found in ${selectedDatabase}. Review suggestions below before generating SQL.`
         );
@@ -151,17 +282,12 @@ export default function ReportBuilder() {
       toast.error("Please select a customer database");
       return;
     }
-
     if (!inference) {
       toast.error("Please complete inference first");
       return;
     }
-
     if (hasSchemaGaps) {
-      const missingList = inference.schemaInsights?.missingFields
-        .map(missing => missing.name)
-        .slice(0, 3)
-        .join(", ");
+      const missingList = inference.schemaInsights?.missingFields.map(m => m.name).slice(0, 3).join(", ");
       toast.error(
         missingList
           ? `These fields were not found in ${selectedDatabase}: ${missingList}. Update the request or pick from the suggested columns before generating SQL.`
@@ -172,16 +298,41 @@ export default function ReportBuilder() {
 
     setSqlLoading(true);
     try {
-      console.log("[handleGenerateSQL] Generating SQL...");
       const result = await generateSQLMutation.mutateAsync({
-        request: naturalLanguageRequest,
-        databaseName: selectedDatabase,
+        db: selectedDatabase,
+        mapping: {
+          metrics: inference.metrics,
+          dimensions: inference.dimensions,
+          filters: inference.filters,
+        },
+        spec: inference.spec,
+      });
+
+      const normalizedColumns = result.columns ?? [];
+      const normalizedParams = result.parameters ?? [];
+
+      setSqlResult({
+        sql: result.sql,
         metrics: inference.metrics,
         dimensions: inference.dimensions,
         filters: inference.filters,
+        parameters: normalizedParams,
+        columns: normalizedColumns,
       });
-      console.log("[handleGenerateSQL] SQL Result:", result);
-      setSqlResult(result);
+
+      let previewData: PreviewResponse | null = null;
+      try {
+        previewData = await previewMutation.mutateAsync({
+          db: selectedDatabase,
+          sql: result.sql,
+          params: {},
+          limit: 100,
+        });
+      } catch (previewError) {
+        console.warn("[FE] Failed to load preview data:", previewError);
+      }
+
+      setSchemaReview(buildSchemaReviewModel(normalizedColumns, normalizedParams, previewData));
       toast.success("SQL generated successfully");
     } catch (error) {
       toast.error("Failed to generate SQL");
@@ -191,49 +342,16 @@ export default function ReportBuilder() {
     }
   };
 
-  // Load schema review data
-  const loadSchemaReview = async (sql: string) => {
-    try {
-      console.log("[loadSchemaReview] Starting to load schema review for SQL:", sql);
-      const review = await getSchemaReviewMutation.refetch();
-      console.log("[loadSchemaReview] Review result:", review);
-      console.log("[loadSchemaReview] Review.data:", review.data);
-      
-      if (review.data) {
-        console.log("[loadSchemaReview] Setting schemaReview state:", review.data);
-        console.log("[loadSchemaReview] Fields:", review.data.fields);
-        console.log("[loadSchemaReview] Parameters:", review.data.parameters);
-        console.log("[loadSchemaReview] ChartConfig:", review.data.chartConfig);
-        
-        setSchemaReview(review.data);
-        setShowSchemaReview(false); // Don't show immediately, wait for user to click
-        toast.success("Schema review ready!");
-      } else {
-        console.error("[loadSchemaReview] No data in review result!");
-      }
-    } catch (error) {
-      console.error("Failed to load schema review:", error);
-    }
-  };
-
   const openFieldEditor = () => {
     if (!inference) return;
-    const seededFields =
+    const seeded =
       editedFields.length > 0
         ? editedFields
         : [
-            ...inference.metrics.map(name => ({
-              name,
-              type: "metric" as const,
-              description: "",
-            })),
-            ...inference.dimensions.map(name => ({
-              name,
-              type: "dimension" as const,
-              description: "",
-            })),
+            ...inference.metrics.map(name => ({ name, type: "metric" as const, description: "" })),
+            ...inference.dimensions.map(name => ({ name, type: "dimension" as const, description: "" })),
           ];
-    setEditedFields(seededFields);
+    setEditedFields(seeded);
     setShowFieldEditor(true);
   };
 
@@ -243,17 +361,14 @@ export default function ReportBuilder() {
       toast.error("Please enter a report title");
       return;
     }
-
     if (!selectedDatabase) {
       toast.error("Please select a customer database");
       return;
     }
-
     if (!sqlResult) {
       toast.error("Please generate SQL first");
       return;
     }
-
     if (!inference) {
       toast.error("Please complete inference first");
       return;
@@ -261,20 +376,53 @@ export default function ReportBuilder() {
 
     setPublishLoading(true);
     try {
-      const result = await publishMutation.mutateAsync({
-        title: reportTitle,
-        naturalLanguageRequest,
-        databaseName: selectedDatabase,
-        generatedSQL: sqlResult.sql,
-        inferredMetrics: inference.metrics,
-        inferredDimensions: inference.dimensions,
-        inferredFilters: inference.filters,
-        resultFields: fieldMetadata,
-      });
+      const chartPayload = schemaReview?.chartConfig
+        ? {
+            type: schemaReview.chartConfig.type,
+            xAxis: schemaReview.chartConfig.xAxis,
+            series: schemaReview.chartConfig.series,
+            values: schemaReview.chartConfig.values,
+            sortBy: schemaReview.chartConfig.sortBy,
+            sortDirection: schemaReview.chartConfig.sortDirection,
+            showDataLabels: schemaReview.chartConfig.showDataLabels,
+            showLegend: schemaReview.chartConfig.showLegend,
+            title: schemaReview.chartConfig.title,
+          }
+        : undefined;
 
-      if (result.success) {
-        setPublishedLink(result.renderLink);
+      const publishPayload = {
+        db: selectedDatabase,
+        metadata: {
+          title: reportTitle,
+        },
+        mapping: {
+          metrics: inference.metrics,
+          dimensions: inference.dimensions,
+          filters: inference.filters,
+        },
+        columns: (schemaReview?.fields ?? []).map(field => ({
+          name: field.technicalName,
+          type: field.dataType,
+          role: field.semanticRole,
+          description: field.description,
+        })),
+        parameters: sqlResult.parameters,
+        filters: inference.filters,
+        chart: chartPayload,
+      };
+
+      const response = await publishMutation.mutateAsync(publishPayload);
+
+      if (response?.success && response?.renderLink) {
+        setPublishedLink(response.renderLink);
         toast.success("Report published successfully!");
+      } else if (response?.renderLink) {
+        setPublishedLink(response.renderLink);
+        toast.success("Report published (render link ready).");
+      } else if (response?.error) {
+        toast.error(response.error.message ?? "Publish failed");
+      } else {
+        toast.error("Publish response did not include a render link.");
       }
     } catch (error) {
       toast.error("Failed to publish report");
@@ -321,30 +469,41 @@ export default function ReportBuilder() {
                   <p className="text-sm font-medium text-slate-700">Customer Database</p>
                   {customerDatabasesQuery.isLoading ? (
                     <p className="text-sm text-slate-500">Loading databases...</p>
+                  ) : customerDatabasesQuery.isError ? (
+                    <div className="text-sm text-red-600 space-y-1">
+                      <p>Failed to load databases. Check console.</p>
+                      {customerDatabasesErrorMessage ? (
+                        <p className="text-xs text-red-500/80 break-all">
+                          Details: {customerDatabasesErrorMessage}
+                        </p>
+                      ) : null}
+                    </div>
                   ) : customerDatabases.length === 0 ? (
-                    <p className="text-sm text-slate-500">No databases available</p>
+                    <p className="text-sm text-slate-500">
+                      No databases available. Check backend connectivity or credentials.
+                    </p>
                   ) : (
                     <Select
-                      value={selectedDatabase ?? ""}
+                      value={selectedDatabase ?? undefined}
                       onValueChange={(val) => {
+                        console.log("[FE] DB selected:", val);
                         setSelectedDatabase(val);
-                        setFieldMetadata([]);
+                        // reset downstream state, but DO NOT clear options
                         setInference(null);
-                        setEditedFields([]);
-                        setShowFieldEditor(false);
                         setSqlResult(null);
                         setSchemaReview(null);
+                        setFieldMetadata([]);
                         setShowSchemaReview(false);
                         setPublishedLink(null);
                       }}
                     >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Choose a database..." />
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Choose a database" />
                       </SelectTrigger>
                       <SelectContent>
-                        {customerDatabases.map((db) => (
-                          <SelectItem key={db} value={db}>
-                            {db}
+                        {customerDatabases.map((name) => (
+                          <SelectItem key={name} value={name}>
+                            {name}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -506,7 +665,6 @@ export default function ReportBuilder() {
                 onBack={() => setShowSchemaReview(false)}
                 onContinue={() => {
                   setShowSchemaReview(false);
-                  // User can now proceed to publish
                 }}
               />
             )}
@@ -551,11 +709,7 @@ export default function ReportBuilder() {
                       onClick={copyLinkToClipboard}
                       className="flex-shrink-0"
                     >
-                      {copiedLink ? (
-                        <Check className="h-4 w-4" />
-                      ) : (
-                        <Copy className="h-4 w-4" />
-                      )}
+                      {copiedLink ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
                     </Button>
                   </div>
                   <Button
@@ -593,9 +747,7 @@ export default function ReportBuilder() {
                     <h4 className="text-sm font-semibold text-slate-700 mb-2">Metrics</h4>
                     <div className="flex flex-wrap gap-2">
                       {inference.metrics?.length > 0 ? (
-                        inference.metrics.map((m, i) => (
-                          <Badge key={i} variant="secondary">{m}</Badge>
-                        ))
+                        inference.metrics.map((m, i) => <Badge key={i} variant="secondary">{m}</Badge>)
                       ) : (
                         <span className="text-xs text-slate-500">None detected</span>
                       )}
@@ -605,9 +757,7 @@ export default function ReportBuilder() {
                     <h4 className="text-sm font-semibold text-slate-700 mb-2">Dimensions</h4>
                     <div className="flex flex-wrap gap-2">
                       {inference.dimensions?.length > 0 ? (
-                        inference.dimensions.map((d, i) => (
-                          <Badge key={i} variant="outline">{d}</Badge>
-                        ))
+                        inference.dimensions.map((d, i) => <Badge key={i} variant="outline">{d}</Badge>)
                       ) : (
                         <span className="text-xs text-slate-500">None detected</span>
                       )}

@@ -23,6 +23,7 @@ import {
   type PreviewResponse,
   type SchemaInsights,
   type SuggestedMappingEntry,
+  type MappingEntry,
 } from "@/lib/reportApi";
 
 interface Inference {
@@ -74,6 +75,29 @@ function coerceStringArray(value: unknown): string[] {
     return [value];
   }
   return [];
+}
+
+function buildMappingEntries(
+  metrics: string[],
+  dimensions: string[],
+  suggested?: SuggestedMappingEntry[]
+): MappingEntry[] {
+  const suggestionMap = new Map<string, string | null>();
+  suggested?.forEach(entry => {
+    if (!entry.term) return;
+    suggestionMap.set(entry.term.toLowerCase(), entry.column ?? null);
+  });
+
+  const buildEntry = (term: string, role: MappingEntry["role"]): MappingEntry => ({
+    term,
+    role,
+    column: suggestionMap.get(term.toLowerCase()) ?? null,
+  });
+
+  return [
+    ...metrics.map(term => buildEntry(term, "metric")),
+    ...dimensions.map(term => buildEntry(term, "dimension")),
+  ];
 }
 
 function buildSchemaReviewModel(
@@ -298,14 +322,23 @@ export default function ReportBuilder() {
 
     setSqlLoading(true);
     try {
+      const mappingEntries = buildMappingEntries(
+        inference.metrics,
+        inference.dimensions,
+        inference.suggestedMapping
+      );
+
+      const specPayload = {
+        ...(inference.spec ?? {}),
+        metrics: inference.metrics,
+        dimensions: inference.dimensions,
+        filters: inference.filters,
+      };
+
       const result = await generateSQLMutation.mutateAsync({
         db: selectedDatabase,
-        mapping: {
-          metrics: inference.metrics,
-          dimensions: inference.dimensions,
-          filters: inference.filters,
-        },
-        spec: inference.spec,
+        mapping: mappingEntries,
+        spec: specPayload,
       });
 
       const normalizedColumns = result.columns ?? [];

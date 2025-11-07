@@ -37,6 +37,12 @@ export interface GenerateSQLResponse {
   columns?: ColumnDef[];
 }
 
+export interface MappingEntry {
+  term: string;
+  role: "metric" | "dimension";
+  column?: string | null;
+}
+
 export interface ParamDef {
   name: string;
   type?: string;
@@ -102,11 +108,7 @@ export async function inferFromNaturalLanguage(payload: {
 
 export async function generateSQL(payload: {
   db: string;
-  mapping: {
-    metrics: string[];
-    dimensions: string[];
-    filters: Array<{ field: string; operator: string; value: string }>;
-  };
+  mapping: MappingEntry[];
   spec?: Record<string, unknown>;
 }): Promise<GenerateSQLResponse> {
   const { data } = await api.post("/report/generateSQL", payload);

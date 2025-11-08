@@ -6,7 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, Copy, Check } from "lucide-react";
+import { Loader2, Copy, Check, ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
 import { SchemaReviewPanel } from "@/components/SchemaReviewPanel";
 import { InferenceReviewTable } from "@/components/InferenceReviewTable";
@@ -25,6 +25,7 @@ import {
   type SuggestedMappingEntry,
   type MappingEntry,
 } from "@/lib/reportApi";
+import { useLocation } from "wouter";
 
 interface Inference {
   metrics: string[];
@@ -179,6 +180,7 @@ function buildSchemaReviewModel(
 }
 
 export default function ReportBuilder() {
+  const [, navigate] = useLocation();
   // Form state
   const [reportTitle, setReportTitle] = useState("");
   const [naturalLanguageRequest, setNaturalLanguageRequest] = useState("");
@@ -478,6 +480,11 @@ export default function ReportBuilder() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-6">
       <div className="max-w-6xl mx-auto">
+        <div className="mb-4">
+          <Button variant="ghost" size="sm" onClick={() => navigate("/")} className="flex items-center gap-2 text-slate-600">
+            <ArrowLeft className="h-4 w-4" /> Home
+          </Button>
+        </div>
         {/* Header */}
         <div className="mb-8">
           <h1 className="text-4xl font-bold text-slate-900 mb-2">Report Builder</h1>

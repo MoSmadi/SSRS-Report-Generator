@@ -1,7 +1,7 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Loader2, ArrowRight } from "lucide-react";
+import { Loader2, ArrowRight, Code2, Sparkles } from "lucide-react";
 import { APP_LOGO, APP_TITLE, getLoginUrl } from "@/const";
 import { useLocation } from "wouter";
 
@@ -96,13 +96,23 @@ export default function Home() {
               </ul>
             </div>
 
-            <Button
-              size="lg"
-              onClick={() => navigate("/report-builder")}
-              className="w-full sm:w-auto"
-            >
-              Start Building <ArrowRight className="ml-2 h-4 w-4" />
-            </Button>
+            <div className="flex flex-col sm:flex-row gap-3">
+              <Button
+                size="lg"
+                onClick={() => navigate("/report-builder")}
+                className="w-full sm:w-auto"
+              >
+                Use Natural Language <Sparkles className="ml-2 h-4 w-4" />
+              </Button>
+              <Button
+                size="lg"
+                variant="outline"
+                onClick={() => navigate("/sql-report-builder")}
+                className="w-full sm:w-auto"
+              >
+                Start with SQL <Code2 className="ml-2 h-4 w-4" />
+              </Button>
+            </div>
           </div>
 
           {/* Feature cards */}
@@ -143,6 +153,38 @@ export default function Home() {
         </div>
 
         {/* Quick start section */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+          <Card>
+            <CardHeader>
+              <CardTitle>Option A: Natural Language to Report</CardTitle>
+              <CardDescription>Let AI translate your intent into metrics, dimensions, and SQL</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-sm text-slate-600">
+                Ideal when you know the analysis you need but not the exact SQL. Describe it, review the inferred fields, and publish.
+              </p>
+              <Button onClick={() => navigate("/report-builder")} className="w-full sm:w-auto">
+                Open Natural Language Builder <ArrowRight className="ml-2 h-4 w-4" />
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Option B: SQL to Report</CardTitle>
+              <CardDescription>Already have SQL? Paste it and jump straight to publishing</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-sm text-slate-600">
+                Great for power users who fine-tune queries by hand. Preview results, label columns, and generate a shareable report without touching the NLP flow.
+              </p>
+              <Button onClick={() => navigate("/sql-report-builder")} variant="secondary" className="w-full sm:w-auto">
+                Open SQL Builder <ArrowRight className="ml-2 h-4 w-4" />
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+
         <Card>
           <CardHeader>
             <CardTitle>Quick Start</CardTitle>

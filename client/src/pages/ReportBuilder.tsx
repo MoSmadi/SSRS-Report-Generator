@@ -656,7 +656,7 @@ export default function ReportBuilder() {
             )}
 
             {/* Step 3: Generate SQL */}
-            {inference && !showSchemaReview && (
+            {inference && !showSchemaReview && !sqlResult && (
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">

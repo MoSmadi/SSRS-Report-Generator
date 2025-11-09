@@ -19,7 +19,8 @@ export function SchemaReviewPanel({
   onBack,
   onContinue,
 }: SchemaReviewPanelProps) {
-  const [activeTab, setActiveTab] = useState("schema");
+  // Changed initial tab from "schema" to "preview"
+  const [activeTab, setActiveTab] = useState("preview");
 
   // Debug logging
   console.log("[SchemaReviewPanel] Render - schemaReview:", schemaReview);
@@ -87,6 +88,10 @@ export function SchemaReviewPanel({
         {/* Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList className="grid w-full grid-cols-4">
+            <TabsTrigger value="preview" className="flex items-center gap-2">
+              <Eye className="h-4 w-4" />
+              Data Preview
+            </TabsTrigger>
             <TabsTrigger value="schema" className="flex items-center gap-2">
               <Table2 className="h-4 w-4" />
               Schema Review
@@ -98,10 +103,6 @@ export function SchemaReviewPanel({
             <TabsTrigger value="chart" className="flex items-center gap-2">
               <BarChart3 className="h-4 w-4" />
               Chart Config
-            </TabsTrigger>
-            <TabsTrigger value="preview" className="flex items-center gap-2">
-              <Eye className="h-4 w-4" />
-              Data Preview
             </TabsTrigger>
           </TabsList>
 

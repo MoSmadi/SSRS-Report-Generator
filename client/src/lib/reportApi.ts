@@ -75,12 +75,27 @@ export async function fetchCustomerDatabases(): Promise<string[]> {
           typeof n === "string" && n.trim().length > 0
       );
 
-    if (names.length === 0) {
+      // Filter to only include databases starting with "dev" (case-insensitive)
+      const devDatabases = names.filter((db: string) =>
+        db.toLowerCase().startsWith("dev")
+      );
+      console.log("[Router] Filtered dev databases (total:", devDatabases.length, "):", devDatabases);
+
+      // Sort to ensure "devtang" appears first, then rest alphabetically
+      devDatabases.sort((a: string, b: string) => {
+        const aLower = a.toLowerCase();
+        const bLower = b.toLowerCase();
+        if (aLower === "devtang") return -1;
+        if (bLower === "devtang") return 1;
+        return a.localeCompare(b);
+      });
+
+    if (devDatabases.length === 0) {
       console.warn("[FE] No databases returned by backend;", "raw:", body);
     } else {
-      console.info("[FE] Databases fetched:", names);
+      console.info("[FE] Databases fetched:", devDatabases);
     }
-    return names;
+    return devDatabases;
   } catch (error) {
     if (isAxiosError(error)) {
       console.error("[FE] Failed to fetch databases:", {

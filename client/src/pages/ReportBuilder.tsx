@@ -621,6 +621,7 @@ export default function ReportBuilder() {
                   <InferenceReviewTable
                     metrics={inference.metrics || []}
                     dimensions={inference.dimensions || []}
+                    suggestedMapping={inference.suggestedMapping}
                     onFieldsChange={setEditedFields}
                     onApply={() => {
                       const pendingFields =

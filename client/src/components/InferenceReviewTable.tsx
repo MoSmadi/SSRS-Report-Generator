@@ -13,9 +13,16 @@ interface InferredField {
   source?: string; // e.g., "PurchaseOrders.SuggestedQuantity"
 }
 
+export interface SuggestedMapping {
+  term: string;
+  column: string;
+  role?: string;
+}
+
 interface InferenceReviewTableProps {
   metrics: string[];
   dimensions: string[];
+  suggestedMapping?: SuggestedMapping[];
   onFieldsChange: (fields: InferredField[]) => void;
   onApply: () => void;
   onClose: () => void;
@@ -24,23 +31,32 @@ interface InferenceReviewTableProps {
 export function InferenceReviewTable({
   metrics,
   dimensions,
+  suggestedMapping = [],
   onFieldsChange,
   onApply,
   onClose,
 }: InferenceReviewTableProps) {
+  // Helper to get suggested column for a field name
+  const getSuggestedColumn = (fieldName: string): string | undefined => {
+    const mapping = suggestedMapping.find(
+      m => m.term.toLowerCase() === fieldName.toLowerCase()
+    );
+    return mapping?.column;
+  };
+
   // Convert metrics and dimensions to editable fields
   const [fields, setFields] = useState<InferredField[]>([
     ...metrics.map(m => ({
       name: m,
       type: "metric" as const,
       description: generateDefaultDescription(m, "metric"),
-      source: generateDefaultSource(m),
+      source: getSuggestedColumn(m) || generateDefaultSource(m),
     })),
     ...dimensions.map(d => ({
       name: d,
       type: "dimension" as const,
       description: generateDefaultDescription(d, "dimension"),
-      source: generateDefaultSource(d),
+      source: getSuggestedColumn(d) || generateDefaultSource(d),
     })),
   ]);
 

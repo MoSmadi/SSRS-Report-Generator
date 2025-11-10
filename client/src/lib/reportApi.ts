@@ -163,3 +163,29 @@ export async function publishReport(payload: PublishReportPayload) {
   const { data } = await api.post("/report/publishReport", payload);
   return data;
 }
+
+export interface SSRSGeneratePayload {
+  sql: string;
+  output_path: string;
+  db_name: string;
+  report_name?: string;
+  data_source_name?: string;
+  data_set_name?: string;
+}
+
+export interface SSRSGenerateResponse {
+  status: "success" | "error";
+  saved_path?: string;
+  report_name?: string;
+  data_source?: string;
+  data_set?: string;
+  fields?: Array<{ name: string; rdlType: string }>;
+  parameters?: Array<{ name: string; type: string }>;
+  notes?: string[];
+  message?: string;
+}
+
+export async function generateSSRSReport(payload: SSRSGeneratePayload): Promise<SSRSGenerateResponse> {
+  const { data } = await api.post("/report/ssrs-generate", payload);
+  return data;
+}

@@ -10,6 +10,7 @@ import { Loader2, Copy, Check, ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
 import { SchemaReviewPanel } from "@/components/SchemaReviewPanel";
 import { InferenceReviewTable } from "@/components/InferenceReviewTable";
+import { SSRSPublishDialog, type SSRSPublishFormData } from "@/components/SSRSPublishDialog";
 import type { AggregationType, DataFormat, SchemaReview, SemanticRole } from "@shared/schemaTypes";
 import {
   fetchCustomerDatabases,
@@ -17,6 +18,7 @@ import {
   inferFromNaturalLanguage,
   publishReport as publishReportApi,
   previewReport,
+  generateSSRSReport,
   type AvailableColumn,
   type ColumnDef,
   type ParamDef,
@@ -205,6 +207,7 @@ export default function ReportBuilder() {
   const [sqlLoading, setSqlLoading] = useState(false);
   const [publishLoading, setPublishLoading] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [showSSRSDialog, setShowSSRSDialog] = useState(false);
 
   // API calls
   const customerDatabasesQuery = useQuery({
@@ -216,6 +219,7 @@ export default function ReportBuilder() {
   const generateSQLMutation = useMutation({ mutationFn: generateSQLApi });
   const publishMutation = useMutation({ mutationFn: publishReportApi });
   const previewMutation = useMutation({ mutationFn: previewReport });
+  const ssrsGenerateMutation = useMutation({ mutationFn: generateSSRSReport });
 
   // 🔧 Normalize DBs no matter what shape the backend returns
   const customerDatabases = useMemo(() => {
@@ -390,8 +394,8 @@ export default function ReportBuilder() {
     setShowFieldEditor(true);
   };
 
-  // Handle publish
-  const handlePublish = async () => {
+  // Handle publish - opens SSRS dialog
+  const handlePublish = () => {
     if (!reportTitle.trim()) {
       toast.error("Please enter a report title");
       return;
@@ -409,58 +413,37 @@ export default function ReportBuilder() {
       return;
     }
 
+    // Open the SSRS dialog
+    setShowSSRSDialog(true);
+  };
+
+  // Handle SSRS generation after dialog submit
+  const handleSSRSGenerate = async (formData: SSRSPublishFormData) => {
+    if (!selectedDatabase || !sqlResult) {
+      toast.error("Missing required data");
+      return;
+    }
+
     setPublishLoading(true);
     try {
-      const chartPayload = schemaReview?.chartConfig
-        ? {
-            type: schemaReview.chartConfig.type,
-            xAxis: schemaReview.chartConfig.xAxis,
-            series: schemaReview.chartConfig.series,
-            values: schemaReview.chartConfig.values,
-            sortBy: schemaReview.chartConfig.sortBy,
-            sortDirection: schemaReview.chartConfig.sortDirection,
-            showDataLabels: schemaReview.chartConfig.showDataLabels,
-            showLegend: schemaReview.chartConfig.showLegend,
-            title: schemaReview.chartConfig.title,
-          }
-        : undefined;
+      const response = await ssrsGenerateMutation.mutateAsync({
+        sql: sqlResult.sql,
+        output_path: formData.outputPath,
+        db_name: selectedDatabase,
+        report_name: formData.reportName || reportTitle || "AutoReport",
+        data_source_name: selectedDatabase, // Use selected database as data source
+        data_set_name: "AutoDataSet", // Default dataset name
+      });
 
-      const publishPayload = {
-        db: selectedDatabase,
-        metadata: {
-          title: reportTitle,
-        },
-        mapping: {
-          metrics: inference.metrics,
-          dimensions: inference.dimensions,
-          filters: inference.filters,
-        },
-        columns: (schemaReview?.fields ?? []).map(field => ({
-          name: field.technicalName,
-          type: field.dataType,
-          role: field.semanticRole,
-          description: field.description,
-        })),
-        parameters: sqlResult.parameters,
-        filters: inference.filters,
-        chart: chartPayload,
-      };
-
-      const response = await publishMutation.mutateAsync(publishPayload);
-
-      if (response?.success && response?.renderLink) {
-        setPublishedLink(response.renderLink);
-        toast.success("Report published successfully!");
-      } else if (response?.renderLink) {
-        setPublishedLink(response.renderLink);
-        toast.success("Report published (render link ready).");
-      } else if (response?.error) {
-        toast.error(response.error.message ?? "Publish failed");
+      if (response.status === "success") {
+        toast.success(`SSRS report generated successfully at ${response.saved_path}`);
+        setPublishedLink(response.saved_path || formData.outputPath);
+        setShowSSRSDialog(false);
       } else {
-        toast.error("Publish response did not include a render link.");
+        toast.error(response.message || "Failed to generate SSRS report");
       }
     } catch (error) {
-      toast.error("Failed to publish report");
+      toast.error("Failed to generate SSRS report");
       console.error(error);
     } finally {
       setPublishLoading(false);
@@ -898,6 +881,16 @@ export default function ReportBuilder() {
           </div>
         </div>
       </div>
+
+      {/* SSRS Publish Dialog */}
+      <SSRSPublishDialog
+        open={showSSRSDialog}
+        onOpenChange={setShowSSRSDialog}
+        onSubmit={handleSSRSGenerate}
+        loading={publishLoading}
+        reportTitle={reportTitle}
+        databaseName={selectedDatabase || undefined}
+      />
     </div>
   );
 }

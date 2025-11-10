@@ -342,6 +342,51 @@ export const appRouter = router({
         return mockData;
       }),
 
+    // Browse server directory for file selection
+    browseDirectory: protectedProcedure
+      .input(z.object({
+        path: z.string(),
+      }))
+      .query(async ({ input }) => {
+        const fs = await import("fs");
+        const path = await import("path");
+        
+        try {
+          // Sanitize and validate path
+          let targetPath = input.path || process.cwd();
+          
+          // Check if path exists
+          if (!fs.existsSync(targetPath)) {
+            return {
+              currentPath: targetPath,
+              entries: [],
+              error: "Path does not exist",
+            };
+          }
+
+          // Read directory
+          const entries = fs.readdirSync(targetPath, { withFileTypes: true });
+          
+          const dirEntries = entries.map(entry => ({
+            name: entry.name,
+            path: path.join(targetPath, entry.name),
+            isDirectory: entry.isDirectory(),
+          }));
+
+          return {
+            currentPath: targetPath,
+            entries: dirEntries,
+          };
+        } catch (error) {
+          console.error("Browse directory error:", error);
+          return {
+            currentPath: input.path,
+            entries: [],
+            error: error instanceof Error ? error.message : "Failed to browse directory",
+          };
+        }
+      }),
+
     // Publish report and generate render link
     publishReport: protectedProcedure
       .input(z.object({

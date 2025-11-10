@@ -849,11 +849,22 @@ export default function ReportBuilder() {
             {/* SQL Preview */}
             {sqlResult && (
               <Card>
-                <CardHeader>
+                <CardHeader className="flex flex-row items-center justify-between">
                   <CardTitle className="text-lg">Generated SQL</CardTitle>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      navigator.clipboard.writeText(sqlResult.sql);
+                      toast.success("SQL copied to clipboard!");
+                    }}
+                  >
+                    <Copy className="h-4 w-4 mr-2" />
+                    Copy SQL
+                  </Button>
                 </CardHeader>
                 <CardContent>
-                  <pre className="bg-slate-900 text-slate-100 p-3 rounded text-xs overflow-auto max-h-64">
+                  <pre className="bg-slate-900 text-slate-100 p-4 rounded text-sm overflow-auto whitespace-pre-wrap break-words">
                     {sqlResult.sql}
                   </pre>
                 </CardContent>
